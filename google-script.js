@@ -1,183 +1,202 @@
-  // Replace with the ID of your specific spreadsheet
-  const TARGET_SPREADSHEET_ID = '1D3Y8DCMOq7b3X7FYuaFqYuGHfbgU_WtUiX0IYU4XHGI';
+// Spreadsheet ID to restrict the script execution
+const TARGET_SPREADSHEET_ID = '1D3Y8DCMOq7b3X7FYuaFqYuGHfbgU_WtUiX0IYU4XHGI';
 
-  // Generates a unique GUID
-  function generateGUID() {
-    return Utilities.getUuid();
+// Column indexes based on the provided order
+const COL_CREATED_EST = 1;
+const COL_NAME = 2;
+const COL_QUESTION_TEXT = 3;
+const COL_QUESTION_URL = 4;
+const COL_LOCATION = 5;
+const COL_ENGINEERING_MANAGER = 6;
+const COL_ID = 7;
+const COL_STATUS = 8;
+const COL_CATEGORY = 9;
+const COL_RESTRICTIONS = 10;
+const COL_QUESTION_NAME = 11;
+const COL_AVAILABILITY = 12;
+const COL_SHADOW_1 = 13;
+const COL_COMPLETED_1 = 14;
+const COL_SHADOW_2 = 15;
+const COL_COMPLETED_2 = 16;
+const COL_SHADOW_3 = 17;
+const COL_COMPLETED_3 = 18;
+const COL_RC_NOTES = 19;
+
+// Generates a unique GUID
+function generateGUID() {
+  return Utilities.getUuid();
+}
+
+// Ensures the "Event Log" sheet exists, creates it if not
+function ensureEventLogSheetExists() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = 'Event Log';
+  let eventLogSheet = spreadsheet.getSheetByName(sheetName);
+
+  // Check if the "Event Log" sheet exists
+  if (!eventLogSheet) {
+    // Create the "Event Log" sheet
+    eventLogSheet = spreadsheet.insertSheet(sheetName);
+
+    // Set up headers for the audit log
+    const headers = ['Timestamp', 'User', 'Edited Row', 'Edited Column', 'New Value', 'Row Link'];
+    eventLogSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
+}
 
-  // Ensures the "Event Log" sheet exists, creates it if not
-  function ensureEventLogSheetExists() {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheetName = 'Event Log';
-    let eventLogSheet = spreadsheet.getSheetByName(sheetName);
+// Triggered when a new form response is submitted
+function onFormSubmit(e) {
+  // Check if the event is triggered from the correct spreadsheet
+  if (e.source.getId() !== TARGET_SPREADSHEET_ID) return;
 
-    // Check if the "Event Log" sheet exists
-    if (!eventLogSheet) {
-      // Create the "Event Log" sheet
-      eventLogSheet = spreadsheet.insertSheet(sheetName);
+  ensureEventLogSheetExists();
+  const formResponsesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses');
+  const shadowerAdminsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shadower Admins');
+  const lastRow = formResponsesSheet.getLastRow();
 
-      // Set up headers for the audit log
-      const headers = ['Timestamp', 'User', 'Edited Row', 'Edited Column', 'New Value'];
-      eventLogSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  // Get the latest row data from Form Responses
+  const rowData = formResponsesSheet.getRange(lastRow, 1, 1, formResponsesSheet.getLastColumn()).getValues()[0];
+
+  // Add Created (EST) as the current date/time and a new GUID for ID
+  const newId = generateGUID();
+
+  // Append the row to Shadower Admins starting from row 3
+  shadowerAdminsSheet.appendRow([...rowData, newId]);
+}
+
+// Triggered when any cell is edited in the spreadsheet
+function onEdit(e) {
+  // Check if the event is triggered from the correct spreadsheet
+  if (e.source.getId() !== TARGET_SPREADSHEET_ID) return;
+
+  ensureEventLogSheetExists();
+  const editedRow = e.range.getRow();
+
+  // Skip edits in rows 1 and 2
+  if (editedRow < 3) return;
+
+  logEditEvent(e);
+  handleCategoryEdit(e);
+  onCategoryEdit(e);
+}
+
+// Logs edits to the "Event Log" sheet
+function logEditEvent(e) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const eventLogSheet = spreadsheet.getSheetByName('Event Log');
+  const editedRange = e.range;
+  const editedRow = editedRange.getRow();
+  const editedCol = editedRange.getColumn();
+  const editedValue = e.value;
+  const user = Session.getActiveUser().getEmail();
+  const timestamp = new Date();
+
+  // Get the name of the edited sheet
+  const editedSheet = e.source.getActiveSheet().getName();
+
+  // Skip logging for specific sheets and header rows
+  if (editedSheet !== 'Form Responses' && editedSheet !== 'Event Log' && editedRow >= 3) {
+    const sheetId = spreadsheet.getId();
+    const rowLink = generateRowLink(sheetId, editedSheet, editedRow);
+
+    // Log the event with timestamp, user, edited row, column, and value, and a link to the edited row
+    eventLogSheet.appendRow([timestamp, user, editedRow, editedCol, editedValue, rowLink]);
+  }
+}
+
+// Generates a hyperlink to the specific row in the sheet
+function generateRowLink(sheetId, sheetName, row) {
+  const link = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${getSheetGid(sheetName)}&range=A${row}`;
+  return `=HYPERLINK("${link}", "Go to Row ${row}")`;
+}
+
+// Gets the GID (sheet ID) of the specified sheet name
+function getSheetGid(sheetName) {
+  const sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+  for (let sheet of sheets) {
+    if (sheet.getName() === sheetName) {
+      return sheet.getSheetId();
     }
   }
+  return null; // Return null if the sheet name doesn't match
+}
 
-  // Triggered when a new form response is submitted
-  function onFormSubmit(e) {
-    if (e.source.getId() !== TARGET_SPREADSHEET_ID) return; // Check if the event is triggered from the correct spreadsheet
-    ensureEventLogSheetExists();
-    const formResponsesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses');
-    const shadowerAdminsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shadower Admins');
-    const lastRow = formResponsesSheet.getLastRow();
+// Handles modifications in "Shadower Admins" and category sheets
+function handleCategoryEdit(e) {
+  const shadowerAdminsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shadower Admins');
+  const editedRange = e.range;
+  const editedRow = editedRange.getRow();
+  const editedCol = editedRange.getColumn();
+  const recordIdCol = COL_ID; // ID column
+  Logger.log(e); 
 
-    // Get the latest row data from Form Responses
-    const rowData = formResponsesSheet.getRange(lastRow, 1, 1, formResponsesSheet.getLastColumn()).getValues()[0];
+  if (e.source.getActiveSheet().getName() === 'Shadower Admins' && editedRow >= 3) {
+    const rowData = shadowerAdminsSheet.getRange(editedRow, 1, 1, shadowerAdminsSheet.getLastColumn()).getValues()[0];
+    const oldCategory = shadowerAdminsSheet.getRange(editedRow, COL_CATEGORY).getValue();
+    const newCategory = editedCol === COL_CATEGORY ? rowData[COL_CATEGORY - 1] : oldCategory;
 
-    // Add Created (EST) as the current date/time and a new GUID for ID
-    const newId = generateGUID();
+    Logger.log(`Old Category: ${oldCategory}, New Category: ${newCategory}`);
 
-    // Append the row to Shadower Admins starting from row 3
-    shadowerAdminsSheet.appendRow([...rowData, newId, '', '', '', '', false]);
-  }
+    // Handle creation of new category sheet if needed
+    if (editedCol === COL_CATEGORY || oldCategory !== newCategory) {
+      let categorySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(newCategory);
 
-  // ******************************************************
-  // Triggered when any cell is edited in the spreadsheet
-  // ******************************************************
+      if (!categorySheet) {
+        categorySheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(newCategory);
 
-  function onEdit(e) {
-    if (e.source.getId() !== TARGET_SPREADSHEET_ID) return; // Check if the event is triggered from the correct spreadsheet
-    ensureEventLogSheetExists();
-    const editedRow = e.range.getRow();
+        const headerRange = shadowerAdminsSheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn());
+        const headerValues = headerRange.getValues();
+        const headerFormats = headerRange.getTextStyles();
+        const headerValidations = headerRange.getDataValidations();
 
-    // Skip edits in rows 1 and 2
-    if (editedRow < 3) return;
-
-    logEditEvent(e);
-    handleCategoryEdit(e);
-    onCategoryEdit(e);
-  }
-
-  // Logs edits to the "Event Log" sheet
-  function logEditEvent(e) {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const eventLogSheet = spreadsheet.getSheetByName('Event Log');
-    const editedRange = e.range;
-    const editedRow = editedRange.getRow();
-    const editedCol = editedRange.getColumn();
-    const editedValue = e.value;
-    const user = Session.getActiveUser().getEmail();
-    const timestamp = new Date();
-
-    // Get the name of the edited sheet
-    const editedSheet = e.source.getActiveSheet().getName();
-
-    // Skip logging for specific sheets and header rows
-    if (editedSheet !== 'Form Responses' && editedSheet !== 'Event Log' && editedRow >= 3) {
-      const sheetId = spreadsheet.getId();
-      const rowLink = generateRowLink(sheetId, editedSheet, editedRow);
-      
-      // Log the event with timestamp, user, edited row, column, and value, and a link to the edited row
-      eventLogSheet.appendRow([timestamp, user, editedRow, editedCol, editedValue, rowLink]);
-    }
-  }
-
-  // Generates a hyperlink to the specific row in the sheet
-  function generateRowLink(sheetId, sheetName, row) {
-    const link = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${getSheetGid(sheetName)}&range=A${row}`;
-    return `=HYPERLINK("${link}", "Go to Row ${row}")`;
-  }
-
-  // Gets the GID (sheet ID) of the specified sheet name
-  function getSheetGid(sheetName) {
-    const sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
-    for (let sheet of sheets) {
-      if (sheet.getName() === sheetName) {
-        return sheet.getSheetId();
+        categorySheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn()).setValues(headerValues);
+        categorySheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn()).setTextStyles(headerFormats);
+        categorySheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn()).setDataValidations(headerValidations);
       }
     }
-    return null; // Return null if the sheet name doesn't match
-  }
 
-  // Handles modifications in "Shadower Admins" and category sheets
-  function handleCategoryEdit(e) {
-    const shadowerAdminsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shadower Admins');
-    const editedRange = e.range;
-    const editedRow = editedRange.getRow();
-    const editedCol = editedRange.getColumn();
-    const categoryCol = 9; // "Category" is in column I
-    const recordIdCol = 7; // ID is in column I (index 7)
+    // Handle updates to the category sheet
+    if (oldCategory) {
+      const oldCategorySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(oldCategory);
 
-    if (e.source.getActiveSheet().getName() === 'Shadower Admins' && editedRow >= 3) {
-      const rowData = shadowerAdminsSheet.getRange(editedRow, 1, 1, shadowerAdminsSheet.getLastColumn()).getValues()[0];
-      const oldCategory = shadowerAdminsSheet.getRange(editedRow, categoryCol).getValue();
-      const newCategory = editedCol === categoryCol ? rowData[categoryCol - 1] : oldCategory;
+      if (oldCategorySheet) {
+        const oldRow = findRowInCategorySheet(oldCategorySheet, rowData[recordIdCol - 1]);
 
-      Logger.log(`Old Category: ${oldCategory}, New Category: ${newCategory}`);
-
-      // Handle creation of new category sheet if needed
-      if (editedCol === categoryCol || oldCategory !== newCategory) {
-        let categorySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(newCategory);
-
-        if (!categorySheet) {
-          categorySheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(newCategory);
-
-          const headerRange = shadowerAdminsSheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn());
-          const headerValues = headerRange.getValues();
-          const headerFormats = headerRange.getTextStyles();
-          const headerValidations = headerRange.getDataValidations();
-
-          categorySheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn()).setValues(headerValues);
-          categorySheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn()).setTextStyles(headerFormats);
-          categorySheet.getRange(1, 1, 2, shadowerAdminsSheet.getLastColumn()).setDataValidations(headerValidations);
+        if (oldRow) {
+          Logger.log(`Deleting row ${oldRow} from old category sheet ${oldCategory}`);
+          oldCategorySheet.deleteRow(oldRow);
         }
       }
+    }
 
-      // Handle updates to the category sheet
-      if (oldCategory) {
-        const oldCategorySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(oldCategory);
+    if (newCategory) {
+      let categorySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(newCategory);
+      const rowInCategory = findRowInCategorySheet(categorySheet, rowData[recordIdCol - 1]);
 
-        if (oldCategorySheet) {
-          const oldRow = findRowInCategorySheet(oldCategorySheet, rowData[recordIdCol - 1]); 
-
-          if (oldRow) {
-            Logger.log(`Deleting row ${oldRow} from old category sheet ${oldCategory}`);
-            oldCategorySheet.deleteRow(oldRow);
-          }
-        }
+      if (rowInCategory) {
+        Logger.log(`Updating row ${rowInCategory} in new category sheet ${newCategory}`);
+        categorySheet.getRange(rowInCategory, 1, 1, rowData.length).setValues([rowData]);
+      } else {
+        Logger.log(`Appending row to new category sheet ${newCategory}`);
+        categorySheet.appendRow(rowData);
       }
-
-      if (newCategory) {
-        let categorySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(newCategory);
-        const rowInCategory = findRowInCategorySheet(categorySheet, rowData[recordIdCol - 1]);
-
-        if (rowInCategory) {
-          Logger.log(`Updating row ${rowInCategory} in new category sheet ${newCategory}`);
-          categorySheet.getRange(rowInCategory, 1, 1, rowData.length).setValues([rowData]);
-        } else {
-          Logger.log(`Appending row to new category sheet ${newCategory}`);
-          categorySheet.appendRow(rowData);
-        }
-      }
-
-      // Update "Shadower Admins" with any changes
-      shadowerAdminsSheet.getRange(editedRow, 1, 1, rowData.length).setValues([rowData]);
     }
   }
+}
 
-  // Finds the row in a category sheet by ID
-  function findRowInCategorySheet(sheet, id) {
-    const recordIdCol = 7; // ID is in column G (index 6)
-    const data = sheet.getDataRange().getValues();
-    for (let i = 2; i < data.length; i++) { // Start searching from row 3
-      if (data[i][recordIdCol-1] === id) {
-        return i + 1;
-      }
+// Finds the row in a category sheet by ID
+function findRowInCategorySheet(sheet, id) {
+  const recordIdCol = COL_ID; // ID column
+  const data = sheet.getDataRange().getValues();
+  for (let i = 2; i < data.length; i++) { // Start searching from row 3
+    if (data[i][recordIdCol - 1] === id) {
+      return i + 1;
     }
-    return null;
   }
+  return null;
+}
 
-  // Syncs edits made in category sheets back to "Shadower Admins"
+// Syncs edits made in category sheets back to "Shadower Admins"
   function onCategoryEdit(e) {
     const editedSheet = e.source.getActiveSheet();
     const shadowerAdminsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shadower Admins');
@@ -203,59 +222,57 @@
   }
 
   // Function to backfill existing rows without an ID and creation date
-  function backfillMissingData() {
-    if (SpreadsheetApp.getActiveSpreadsheet().getId() !== TARGET_SPREADSHEET_ID) return; // Verifica que el ID de la hoja de cálculo coincida
-    const shadowerAdminsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shadower Admins');
-    const dataRange = shadowerAdminsSheet.getRange(3, 1, shadowerAdminsSheet.getLastRow() - 2, shadowerAdminsSheet.getLastColumn());
-    const data = dataRange.getValues();
-    const idUpdates = [];
-    const urlUpdates = [];
-    const recordIdCol = 7; // ID is in column I (index 7)
+function backfillMissingData() {
+  if (SpreadsheetApp.getActiveSpreadsheet().getId() !== TARGET_SPREADSHEET_ID) return; // Ensure correct spreadsheet ID
+  const shadowerAdminsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Shadower Admins');
+  const dataRange = shadowerAdminsSheet.getRange(3, 1, shadowerAdminsSheet.getLastRow() - 2, shadowerAdminsSheet.getLastColumn());
+  const data = dataRange.getValues();
+  const idUpdates = [];
+  const urlUpdates = [];
 
-    data.forEach((row, index) => {
-      const rowIndex = index + 3; // Ajuste para la posición real de la fila
-      const id = row[recordIdCol - 1]; // Columna I (ID)
-      const createdDate = row[0]; // Columna A (Created EST)
-      const name = row[1]; // Columna B (Admin name)
-      const questionURL = row[3]; // Columna D (URL de la pregunta)
+  data.forEach((row, index) => {
+    const rowIndex = index + 3; // Adjust for the actual row position
+    const id = row[COL_ID - 1]; // Get ID from column G
+    const createdDate = row[COL_CREATED_EST - 1]; // Get Created (EST) from column A
+    const name = row[COL_NAME - 1]; // Get Name from column B
+    const questionURL = row[COL_QUESTION_URL - 1]; // Get Question URL from column D
 
-      if (!name) {
-        return;
+    if (!name) {
+      return; // Skip processing if Name is missing
+    }
+
+    // Backfill ID if missing
+    if (!id) {
+      const newId = generateGUID();
+      idUpdates.push([rowIndex, COL_ID, newId]); // Store row and column for ID update
+    }
+
+    // Backfill Created Date if missing
+    if (!createdDate) {
+      const newCreatedDate = new Date();
+      idUpdates.push([rowIndex, COL_CREATED_EST, newCreatedDate]); // Store row and column for Created Date update
+    }
+
+    // Backfill Question URL if it is missing but column C has a hyperlink
+    if (!questionURL && shadowerAdminsSheet.getRange(rowIndex, COL_QUESTION_TEXT).getRichTextValue()) {
+      const richTextValue = shadowerAdminsSheet.getRange(rowIndex, COL_QUESTION_TEXT).getRichTextValue();
+      const url = richTextValue.getLinkUrl(); // Get URL from hyperlink
+      const plainText = richTextValue.getText(); // Get plain text
+
+      if (url) {
+        urlUpdates.push([rowIndex, COL_QUESTION_URL, url]); // Update column D with URL
+        shadowerAdminsSheet.getRange(rowIndex, COL_QUESTION_TEXT).setValue(plainText); // Update column C with plain text
       }
+    }
+  });
 
-      // Backfill de ID si está vacío
-      if (!id) {
-        const newId = generateGUID();
-        idUpdates.push([rowIndex, 9, newId]); // Guarda la fila y columna para la actualización del ID
-      }
+  // Apply ID and Created Date updates
+  idUpdates.forEach(([rowIndex, colIndex, value]) => {
+    shadowerAdminsSheet.getRange(rowIndex, colIndex).setValue(value);
+  });
 
-      // Backfill de Created Date si está vacío
-      if (!createdDate) {
-        const newCreatedDate = new Date();
-        idUpdates.push([rowIndex, 1, newCreatedDate]); // Guarda la fila y columna para la actualización del Created Date
-      }
-
-      // Si la URL de la pregunta está vacía pero la Columna 3 tiene un hipervínculo
-      if (!questionURL && shadowerAdminsSheet.getRange(rowIndex, 3).getRichTextValue()) {
-        const richTextValue = shadowerAdminsSheet.getRange(rowIndex, 3).getRichTextValue();
-        const url = richTextValue.getLinkUrl(); // Obtiene la URL del hipervínculo
-        const plainText = richTextValue.getText(); // Obtiene el texto plano
-
-        // Actualiza el texto y la URL en las columnas correspondientes
-        if (url) {
-          urlUpdates.push([rowIndex, 4, url]); // Actualiza la Columna D con la URL
-          shadowerAdminsSheet.getRange(rowIndex, 3).setValue(plainText); // Actualiza la Columna C con solo el texto
-        }
-      }
-    });
-
-    // Actualiza los IDs y Created Dates faltantes
-    idUpdates.forEach(([rowIndex, colIndex, value]) => {
-      shadowerAdminsSheet.getRange(rowIndex, colIndex).setValue(value);
-    });
-
-    // Actualiza las URLs en la Columna 4
-    urlUpdates.forEach(([rowIndex, colIndex, url]) => {
-      shadowerAdminsSheet.getRange(rowIndex, colIndex).setValue(url);
-    });
-  }
+  // Apply URL updates
+  urlUpdates.forEach(([rowIndex, colIndex, url]) => {
+    shadowerAdminsSheet.getRange(rowIndex, colIndex).setValue(url);
+  });
+}
